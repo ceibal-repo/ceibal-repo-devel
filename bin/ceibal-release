@@ -1,0 +1,129 @@
+#!/bin/bash
+
+#
+# Libera una nueva versión del paquete.
+# Agrega un tag con <repo>-<version> y publica los cambios a git.
+#
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+if [ ! -d './debian' ]; then
+	echo -e "Error: No existe el directorio './debian'.\nEjecute el comando en la raíz del paquete." >&2
+        exit 1;
+fi 
+
+if [ ! -e './debian/changelog' ]; then
+	echo -e "Error: No existe el archivo './debian/changelog'." >&2
+        exit 1;
+fi 
+
+if [ ! -d './.git' ]; then
+	echo -e "Error: No es un repositorio de git." >&2
+        exit 1;
+fi 
+
+if [ "$(git status --porcelain)" != "" ]; then
+	echo -e "Error: Hay cambios pendientes.\nEjecutar 'git status' para verlos.\nTodos los cambios deben ser revertidos/confirmados antes de hacer un release." >&2
+        exit 1;
+fi
+
+LAST_DISTRO=$(dpkg-parsechangelog --show-field Distribution)
+if grep "${LAST_DISTRO}" /usr/share/lintian/vendors/ceibal/main/data/changes-file/known-dists>/dev/null; then
+    REPO_CODENAME=$LAST_DISTRO
+fi
+
+DEFAULT_CODENAME=$REPO_CODENAME
+
+INCREMENT=0
+FORCE=0
+
+usage() {
+      cat >&2 <<USAGE
+Libera una nueva versión de un paquete.
+Uso: $0 [-i] [-f] [-r]
+    -i Incrementar la versión en debian/changelog y luego liberar.
+    -f Agregar tag y publicar a git, aun si el changelog no está marcado 
+       como UNRELEASED.
+    -r Repositorio donde se va a publicar el paquete (por defecto: ${DEFAULT_CODENAME}).
+USAGE
+}
+
+while getopts ":hr:fi" opt; do
+  case $opt in
+    i)
+      INCREMENT=1
+      ;;
+    f)
+      FORCE=1
+      ;;
+    r)
+      REPO_CODENAME=$OPTARG
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    \?)
+      echo "Opción inválida: -$OPTARG" >&2
+      usage
+      exit 1
+  esac
+done
+
+LOCAL=$(git rev-parse @)
+REMOTE=$(git rev-parse @{u})
+BASE=$(git merge-base @ @{u})
+test $REMOTE = $BASE
+MUST_PUSH=$?
+
+CHANGELOG_DATE=$(stat --printf='%Y' ./debian/changelog)
+if [ "${INCREMENT}" -eq 0 ]; then
+	if [ "${LAST_DISTRO}" != "UNRELEASED" -a "$FORCE" -ne 1 ]; then
+      		cat >&2 <<ERROR
+Error: El paquete no está marcado como UNRELEASED en debian/changelog.
+Si está intentando re-liberar un paquete que falló al firmarse o publicarse a git, pase la opción '-f' para ignorar este error.
+Si está intentando liberar un nueva versión de un paquete, pase la opción '-i', o ejecute 'dch -i' para incrementar la versión antes de hacer una liberación.
+ERROR
+                exit 1
+	fi
+	dch -r -D ${REPO_CODENAME} ${DCH_OPTIONS}
+else
+	dch -i -D ${REPO_CODENAME} ${DCH_OPTIONS}
+fi
+
+if [ "${CHANGELOG_DATE}" -eq "$(stat --printf='%Y' ./debian/changelog)" ]; then
+	echo "Debe actualizar o grabar el archivo de changelog." >&2 && exit 1;
+fi
+
+if [ "$(dpkg-parsechangelog --show-field DISTRIBUTION)" = "UNRELEASED" ]; then
+	echo "El paquete no debe quedar marcado como UNRELEASED." >&2 && exit 1;
+fi
+
+NAME=${PWD##*/}
+VERSION=$(dpkg-parsechangelog --show-field Version|tr ':' '_'|tr '~' '_')
+
+git add ./debian/changelog
+[ $? -ne 0 ] && exit 1;
+
+LAST_MESSAGE=$(git log -1 --pretty=%B)
+NEW_MESSAGE="Se actualizó el changelog para versión ${REPO_CODENAME}-${VERSION}."
+
+if [ "${LAST_MESSAGE}" ==  "${NEW_MESSAGE}" -a $MUST_PUSH ]; then
+    git commit --amend -m "${NEW_MESSAGE}"
+else
+    git commit -m "${NEW_MESSAGE}"
+fi
+[ $? -ne 0 ] && exit 1;
+
+TAGNAME=${REPO_CODENAME}-${VERSION}
+git tag -s "${TAGNAME}" -m "Versión ${VERSION} para ${REPO_CODENAME}"
+[ $? -ne 0 ] && exit 1;
+
+git push origin HEAD "${TAGNAME}"
+[ $? -ne 0 ] && exit 1;

@@ -1,0 +1,17 @@
+Source: ceibal-repo-devel
+Section: devel
+Priority: optional
+Maintainer: Plan Ceibal <apt@plan.ceibal.edu.uy>
+Build-Depends: debhelper (>= 9.0.0), rsyslog
+Standards-Version: 3.9.5
+Vcs-Git: git://github.com/ceibal-repo/ceibal-repo-devel.git
+Vcs-Browser: https://github.com/ceibal-repo/ceibal-repo-devel/
+
+Package: ceibal-repo-devel
+Architecture: all
+Depends: ${misc:Depends}, wget, apt, parallel, pbuilder, devscripts, build-essential, debhelper, dpkg-dev, git, git-buildpackage, quilt, gnupg2, nginx, cdbs, awstats, fcgiwrap, openssh-client, openssh-server, rsyslog, gnome-pkg-tools, dh-autoreconf, cowbuilder, sudo, reprepro
+Description: Herramientas para Repositorio 
+ Provee scripts y archivos de configuracion para construir paquetes para el 
+ repositorio APT Ceibal.
+ Tambien incluye dependencias a utilitarios usados para construir paquetes 
+ debian.

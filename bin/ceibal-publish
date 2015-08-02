@@ -1,0 +1,147 @@
+#!/bin/bash
+
+#
+# Construye el paquete en el servidor de build y publica el paquete resultante 
+# en el repositorio.
+# 
+REPO_SERVER=apt.ceibal.edu.uy
+REPO_USER=root
+REPO_BASEDIR=/srv/reprepro/ubuntu/
+BUILD_USER=devel
+BUILD_SERVER=builds.ceibal.edu.uy
+BUILD_BASEDIR=/var/cache/pbuilder/
+BUILD_CODENAME=precise
+BUILD_UPSTREAM_WWW=http://${BUILD_SERVER}/upstream/
+SSH_PORT=3022
+ARCH="i386 amd64"
+VERSION=
+NAME=
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+DEFAULT_CODENAME=$REPO_CODENAME
+ONLY_BUILD=0
+
+usage() {
+    cat >&2 <<USAGE
+Uso: $0 -n <nombre del paquete> -v <version> [-a ARCH] [-r <codename>] [-b]
+    -a Construir y publicar solo para esta arquitectura (por defecto: ${ARCH}).
+    -r Repositorio donde publicar el paquete (por defecto: ${DEFAULT_CODENAME}).
+    -b Solo construir el paquete, no agregarlo al repositorio.
+    -e Solo intentar exportar los paquetes construidos. Los paquetes ya deben
+       estar disponibles en el servidor.
+USAGE
+}
+
+EXPORT=0
+FORCE_EXPORT=0
+while getopts ":hbefa:n:v:r:" opt; do
+    case $opt in
+        a)
+            ARCH=$OPTARG
+            ;;
+        n)
+            NAME=$OPTARG
+            ;;
+        v)
+            VERSION=$OPTARG
+            ;;
+        b)
+            ONLY_BUILD=1
+            ;;
+        r)
+            REPO_CODENAME=$OPTARG
+            ;;
+        e)
+            EXPORT=1
+            ;;
+        h)
+            usage
+            exit 0
+            ;;
+         \?)
+            echo "Invalid option: -$OPTARG" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$NAME" = "" -o "$VERSION" = "" ]; then
+    usage;
+    exit 1;
+fi
+
+ARCH_LIST=(${ARCH})
+
+if [ "${#ARCH_LIST[@]}" -lt 1 ]; then
+    echo "Debe indicar al menos una arquitectura." >&2
+    exit 1
+fi
+
+FILE_VERSION=${VERSION/[0-9]_/}
+
+export_packages() {
+    echo "Publicando paquetes en el repositorio '${REPO_CODENAME}'."
+    EXPORT_SCRIPT="$(cat <<EOF
+# Configurar el agente para peir el password una sola vez.
+gpg-agent --daemon /bin/bash <<IN_DAEMON_EOF
+for arch in ${ARCH_LIST[@]}; do
+    changes_file="staging-\\\${arch}/${NAME}_${FILE_VERSION}_\\\${arch}.changes"
+    if [ -f ${changes_file} ]; then
+        reprepro --basedir ${REPO_BASEDIR} include ${REPO_CODENAME} \\\${changes_file}
+    else
+        echo "No existe archivo a publicar \\\${changes_file}"
+    fi
+done
+exit
+IN_DAEMON_EOF
+EOF
+)"
+    ssh -t -p ${SSH_PORT} ${REPO_USER}@${REPO_SERVER} "${EXPORT_SCRIPT}"
+}
+
+if [[ ${EXPORT} -eq 1 ]]; then
+   export_packages
+   exit 0
+fi
+
+ssh -t -p ${SSH_PORT} -A ${BUILD_USER}@${BUILD_SERVER} "ceibal-build -a '${ARCH}' -n '${NAME}' -v '${VERSION}' -r '${REPO_CODENAME}'"
+[ $? -ne 0 ] && echo 'Falló la construcción del paquete.' >&2 && exit 1;
+
+
+# Copy built files to repository server for publishing.
+TEMP_BUILD_DIR=`mktemp -d`
+for arch in "${ARCH_LIST[@]}"; do
+    echo "Copiando archivos creados al equipo local bajo '${TEMP_BUILD_DIR}/${arch}'."
+    mkdir ${TEMP_BUILD_DIR}/${arch}
+    scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*${FILE_VERSION}[_.]* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
+    scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*.tar.* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
+    if [ $? -ne 0 ]; then 
+        echo "No se crearon archivos para la arquitectura '${arch}'."
+        rm -rf ${TEMP_BUILD_DIR}/${arch}
+    else 
+        echo "Copiando archivos creados al repositorio bajo '${REPO_USER}@${REPO_SERVER}:staging-${arch}/'."
+        scp -P ${SSH_PORT} ${TEMP_BUILD_DIR}/${arch}/* ${REPO_USER}@${REPO_SERVER}:staging-${arch}/
+    fi
+done
+
+if [[ ${ONLY_BUILD} -eq 0 ]]; then
+    # Copiar ceibal-repo a la raíz del servidor HTTP, y crear un link a la última versión.
+    if [ "${NAME}" = "ceibal-repo" ]; then
+	    ssh -t -p ${SSH_PORT} ${REPO_USER}@${REPO_SERVER} 'bash -sh'<<EOF
+cp staging-${ARCH_LIST[0]}/${NAME}_${FILE_VERSION}_all.deb ${REPO_WEBROOT};
+ln -f -s ${REPO_WEBROOT}/${NAME}_${FILE_VERSION}_all.deb ${REPO_WEBROOT}/${NAME}.deb
+EOF
+    fi
+
+    [ $? -ne 0 ] && echo 'Falló la copia al repositorio.' >&2 && exit 1;
+    export_packages
+fi
+
+rm -rf ${TEMP_BUILD_DIR}

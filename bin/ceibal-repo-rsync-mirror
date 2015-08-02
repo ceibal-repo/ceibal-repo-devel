@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# Mirrors the content of the repository master.
+
+MASTER_REPO_RSYNC=rsync
+MASTER_REPO_SERVER=apt.ceibal.edu.uy
+MASTER_REPO_PORT=32527
+RSYNC_SSH_KEY=/root/.ssh/rsync_dsa
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+SSH_HOST="${MASTER_REPO_RSYNC}@${MASTER_REPO_SERVER}"
+SSH_PORT=${MASTER_REPO_PORT}
+SSH_COMMAND="ssh -i ${RSYNC_SSH_KEY} -p ${SSH_PORT}"
+
+# Initialize known_hosts the first time if necessary.
+if ! grep ${MASTER_REPO_SERVER} /root/.ssh/known_hosts > /dev/null 2>&1; then
+	ssh-keyscan -p ${SSH_PORT} -t ecdsa ${MASTER_REPO_SERVER} >> /root/.ssh/known_hosts 2>/dev/null
+fi
+
+DIRS="/srv/reprepro/ /etc/nginx/ /etc/awstats/"
+for x in ${DIRS}; do
+	rsync -avz --delete-after -e "${SSH_COMMAND}" ${SSH_HOST}:${x} ${x}
+done
+
+service nginx reload

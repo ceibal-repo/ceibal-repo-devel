@@ -1,0 +1,140 @@
+#!/bin/bash
+
+# Configures a new repository server from scratch.
+# To create mirrors of an existing repository service, use ceibal-setup-mirror instead.
+
+unset CDPATH
+
+REPO_BASEDIR=/srv/reprepro/ubuntu
+REPO_USER=repo
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+if [[ $EUID -ne 0 ]]; then
+    echo "El script debe ejecutarse como root." >&2
+    exit 1
+fi
+
+EXAMPLES=/usr/share/doc/ceibal-repo-devel/examples/
+if [[ ! -d ${EXAMPLES} ]]; then
+    echo "No se encontro el directorio con los archivos de configuracion de ejemplo." >&2
+    exit 1
+fi
+
+if ! id -u "${REPO_USER}" > /dev/null; then
+    echo "Agregando usuario ${REPO_USER}"
+    useradd -m -U "${REPO_USER}" -s /bin/bash
+    if [[ $? -ne 0 ]]; then 
+        echo "Fallo al agregar usuario ${REPO_USER}.">&2
+        exit 1
+    fi
+
+    mkdir /home/${REPO_USER}/staging-i386
+    mkdir /home/${REPO_USER}/staging-amd4
+    chown ${REPO_USER}:${REPO_USER} /home/${REPO_USER}/staging-i386 /home/${REPO_USER}/staging-amd4
+fi
+
+KEY_ID=""
+echo "Generar clave GPG?"
+select sn in "Si" "No"; do
+    case $sn in
+        Si ) 
+            echo "Generando clave GPG del repositorio."
+            gpg2 --gen-key --batch <<EOF
+Key-Type: RSA
+Key-Length: 4096
+Key-Usage: sign
+Name-Real: Repositorio APT - Plan Ceibal
+Name-Comment: Repositorio APT - Plan Ceibal
+Name-Email: apt@plan.ceibal.edu.uy
+Expire-Date: 0
+%ask-passphrase
+%echo "El proceso puede durar varios minutos mientras se acumula entropia en /dev/random."
+%commit
+%echo "Clave generada."
+EOF
+            if [[ $? -ne 0 ]]; then
+                echo "Fallo al generar clave." >&2
+                exit 1            
+            fi
+
+            KEY_ID=$(gpg2 --with-colons --list-keys apt@plan.ceibal.edu.uy|grep '^pub:'|cut -d ':' -f 5)            
+            if [[ $? -ne 0 ]]; then
+                echo "Fallo al obtener ID de clave." >&2
+                exit 1            
+            fi
+            break;;
+        No )
+            echo "Ingrese el ID de la clave GPG a usar para el repositorio:"
+            read KEY_ID
+            break;;
+    esac
+done
+
+$(gpg2 --list-keys "${KEY_ID}" > /dev/null);
+if [[ $KEY_ID == "" || $? -ne 0 ]]; then
+    echo "ID de clave invalida." >&2
+    exit 1            
+fi
+
+KEYFILE=$(mktemp)
+$(gpg2 --export-secret-key "${KEY_ID}" > "${KEYFILE}"); 
+if [[ $? -ne 0 ]]; then
+    echo "Fallo al exportar clave." >&2
+    exit 1            
+fi
+$(chown "${REPO_USER}" "${KEYFILE}")
+$(sudo -u "${REPO_USER}" -i gpg2 --allow-secret-key-import --import "${KEYFILE}")
+if [[ $? -ne 0 ]]; then
+    echo "Fallo al importar clave." >&2
+    exit 1            
+fi
+$(rm "${KEYFILE}")
+
+mkdir -p "${REPO_BASEDIR}"/{conf,dists,incoming,indices,logs,pool,project,tmpl}
+
+cp -r "${EXAMPLES}/reprepro.distributions" "${REPO_BASEDIR}/conf/distributions"
+if [ -d "${REPO_BASEDIR}/conf/distributions" ]; then
+    sed -i -e "s,//KEY_ID//,${KEY_ID}," "${REPO_BASEDIR}"/conf/distributions/*
+else
+    sed -i -e "s,//KEY_ID//,${KEY_ID}," "${REPO_BASEDIR}/conf/distributions"
+fi
+cp "${EXAMPLES}/reprepro.options" "${REPO_BASEDIR}/conf/options"
+
+chown -R "${REPO_USER}" "${REPO_WEBROOT}"
+
+if [[ -d "/etc/nginx/sites-available/" ]]; then
+    echo "Configurando nginx."
+    echo -n "Hostname del servidor HTTP [${REPO_SERVER}]: "
+    read REPO_HOST
+    if [[ ${REPO_HOST} == "" ]]; then
+        REPO_HOST=${REPO_SERVER}
+    fi
+
+    # Configuracion del servidor HTTP para el repo.
+    cp "${EXAMPLES}/nginx_ceibalrepo.conf" "/etc/nginx/sites-available/ceibalrepo.conf"
+    sed -i -e "s,//REPO_SERVER//,${REPO_HOST}," "/etc/nginx/sites-available/ceibalrepo.conf"
+    ln -s "/etc/nginx/sites-available/ceibalrepo.conf" "/etc/nginx/sites-enabled/"
+    echo
+
+    BUCKET_CONF="/etc/nginx/conf.d/server_names_hash_bucket_size.conf"    
+    if [[ ! -f "${BUCKET_CONF}" ]]; then
+        echo "Configurando ${BUCKET_CONF}."
+        echo "server_names_hash_bucket_size 64;" > "${BUCKET_CONF}"
+    fi
+fi
+
+echo "Configurando awstats."
+mkdir -p "/var/lib/awstats/${REPO_HOST}/"
+chown -R www-data:adm "/var/lib/awstats/${REPO_HOST}/"
+mkdir -p "${REPO_BASEDIR}/stats"
+zcat "${EXAMPLES}/awstats.hostname.conf.gz" > "/etc/awstats/awstats.${REPO_HOST}.conf"
+sed -i -e "s,//REPO_SERVER//,${REPO_HOST}," "/etc/awstats/awstats.${REPO_HOST}.conf"
+
+/usr/sbin/service nginx reload

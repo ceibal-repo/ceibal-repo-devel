@@ -1,0 +1,7 @@
+/var/log/ceibal-repo-devel/*.log {
+	rotate 2
+	weekly
+	compress
+	missingok
+	endscript
+}

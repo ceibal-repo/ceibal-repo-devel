@@ -1,0 +1,6 @@
+examples/devscripts
+examples/gbp.conf
+examples/reprepro.distributions
+examples/reprepro.options
+examples/awstats.hostname.conf
+examples/nginx_ceibalrepo.conf

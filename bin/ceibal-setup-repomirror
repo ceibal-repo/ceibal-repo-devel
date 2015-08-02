@@ -1,0 +1,19 @@
+#!/bin/bash
+
+mkdir -p /var/log/ceibal-repo/nginx
+chown root:syslog /var/log/ceibal-repo/
+chown www-data:adm /var/log/ceibal-repo/nginx/
+
+mkdir -p /var/lib/awstats/ceibalrepo.ddns.net/
+chown www-data:adm /var/lib/awstats/ceibalrepo.ddns.net/
+
+cat <<EOF > /etc/cron.d/ceibal-rsync-mirror
+# /etc/cron.d/ceibal-mirror-rsync: mirrors the ceibal master repository.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+*/30 * * * *   root /usr/bin/ceibal-rsync-mirror
+EOF
+
+ceibal-rsync-mirror

@@ -1,0 +1,5 @@
+Cmnd_Alias      PBUILDER = /usr/bin/pdebuild
+Defaults!PBUILDER env_keep+=ARCH
+
+# Allow members of the build group to run pdebuild without password.
+%build ALL=NOPASSWD: PBUILDER

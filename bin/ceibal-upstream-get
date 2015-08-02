@@ -1,0 +1,120 @@
+#!/bin/bash
+
+#
+# Copies a .tar.gz file to the upstream/ path of the build server.
+# 
+
+BUILD_USER=devel
+BUILD_SERVER=192.168.100.115
+BUILD_UPSTREAM_WWW=http://${BUILD_SERVER}/upstream/
+
+unset CDPATH
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+while getopts ":n:v:" opt; do
+    case $opt in
+        n)
+            NAME=$OPTARG
+            ;;
+        v)
+            VERSION=$OPTARG
+            ;;
+         \?)
+           echo "Invalid option: -$OPTARG" >&2
+           ;;
+    esac
+done
+
+if [ -z "$NAME" -o -z "$VERSION" ]; then
+    echo "Usage: $0 -n <package name> -v <version>" >&2
+    exit 1
+fi
+
+# Verificar que se esta en un directorio debianizado.
+if [ ! -d "debian" -o ! -e "debian/changelog" ]; then
+    echo "Ejecutar este comando dentro del directorio que contiene el directorio debian/" >&2
+    exit 1;
+fi
+
+# Verificar que el paquete actual coincide con el upstream.
+if [ "$(dpkg-parsechangelog --show-field Source)" != "${NAME}" ]; then
+    echo "El nombre del paquete en debian/changelog no es ${NAME}." >&2
+    exit 1
+fi
+
+# Verificar que no se haya ya ejecutado el comando sin haber llamado antes
+# a ceibal-upstream-clean.
+if [ -e ".ceibal-upstream-get.files" ]; then
+    echo "Ya existe el archivo .ceibal-upstream-get.files. Ejecutar ceibal-upstream-clean antes de volver a obtener el paquete upstream." >&2
+    exit 1
+fi
+
+# Verificar que .gitignore exista. Se asume que si existe esta correctamente configurado
+# para ignorar archivos del upstream (todos menos debian/ LICENSE y README.md).
+if [ ! -e ".gitignore" -a -d ".git" ]; then
+    echo "Git ignore no está configurado correctamente. Creando .gitignore, recuerdar agregarlo a git." >&2
+    cat > .gitignore <<GITIGNORE
+# Ignore everything
+*
+
+# Except debian package and git package files.
+!.gitignore
+!debian
+!debian/*
+!debian/**/*
+!README.md
+!LICENSE
+GITIGNORE
+fi
+
+# Bajar el archivo desde la maquina de build.
+UPSTREAM_SRC="${NAME}-${VERSION}.tar.gz"
+wget "${BUILD_UPSTREAM_WWW}/${UPSTREAM_SRC}"
+
+# Verificar que se bajo correctamente el archivo.
+if [ $? -ne 0 -o ! -f "${UPSTREAM_SRC}" ]; then
+    echo "No se encontro el paquete upstream: ${UPSTREAM_SRC}" >&2
+    exit 1
+fi
+
+# Mover a un directorio temporal para construir el paquete.
+ORIG_UPSTREAM_SRC=${NAME}_${VERSION}.orig.tar.gz
+mv "${UPSTREAM_SRC}" "../${ORIG_UPSTREAM_SRC}" || exit 1
+mkdir .orig.tmp || exit 1
+cd .orig.tmp 
+tar xvzf "../../${ORIG_UPSTREAM_SRC}" || exit 1
+UPSTREAM_DIR=$(ls -1)
+if [ "$(wc -l <<< ${UPSTREAM_DIR})" = "1" -a -d "${UPSTREAM_DIR}" ]; then
+    for x in "debian" "LICENSE" "README.md"; do
+        if [ -e "${UPSTREAM_DIR}/${x}" ]; then
+            echo "El upstream .tar.gz contiene un archivo ${x}. Eliminándolo."
+            rm -rf "${UPSTREAM_DIR}/${x}"
+        fi
+    done
+
+    cd "${UPSTREAM_DIR}"
+    find * > ../../.ceibal-upstream-get.files
+    mv * ../../
+    cd ..
+fi
+cd ..
+rm -rf .orig.tmp
+
+SOURCE="debian/source"
+mkdir -p "${SOURCE}"
+if [ ! -e "${SOURCE}/format" ]; then
+    echo "Marcando el paquete con formato 3.0 (quilt) en ${SOURCE}/format"
+    echo "3.0 (quilt)" > ${SOURCE}/format
+fi
+
+if [ ! -e "${SOURCE}/options" ]; then
+    echo "Ignorando  archivos de git en ${SOURCE}/options"
+    echo 'extend-diff-ignore = "(.git|.gitignore|.ceibal-upstream-get.files|LICENSE|README.md)$"' > ${SOURCE}/options
+fi

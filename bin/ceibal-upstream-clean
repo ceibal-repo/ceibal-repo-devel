@@ -1,0 +1,23 @@
+#!/bin/bash
+
+#
+# Removes files unpacked by ceibal-upstream-get
+# 
+
+FILES=".ceibal-upstream-get.files"
+
+if [ ! -d "debian" -o ! -e "debian/changelog" ]; then
+    echo "Ejecutar este comando dentro del directorio que contiene el directorio debian/" >&2
+    exit 1;
+fi
+
+if [ ! -f "${FILES}" ]; then
+    echo "Este directorio no fue desempacado por ceibal-upstream-get, o se borro el archivo ${$FILES}" >&2
+    exit 1
+fi
+
+while read file; do 
+    rm -rf "$file"  
+done < "${FILES}"
+
+rm -f "${FILES}"

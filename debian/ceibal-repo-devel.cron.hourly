@@ -1,0 +1,7 @@
+#!/bin/sh
+
+. /etc/ceibal.conf
+
+if [ -f "/etc/awstats/awstats.${REPO_SERVER}.conf" && -d /srv/reprepro/stats/ ]; then
+    /usr/lib/cgi-bin/awstats.pl -config=${REPO_SERVER} -update -output > /srv/reprepro/stats/index.html
+fi

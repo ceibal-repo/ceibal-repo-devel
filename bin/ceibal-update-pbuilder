@@ -1,0 +1,14 @@
+#!/bin/sh
+ 
+t=$(tempfile -p .upc. -s .list) || exit 1
+ 
+cat > $t << EOF
+/etc/pbuilderrc.amd64.ceibal
+/etc/pbuilderrc.i386.ceibal
+EOF
+ 
+parallel /usr/sbin/cowbuilder --update --configfile :::: $t | tee -a /var/log/ceibal-repo-devel/pbuilder.log
+ 
+rm -f $t
+ 
+exit 0

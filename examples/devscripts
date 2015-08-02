@@ -1,0 +1,5 @@
+# Opciones por defecto para devscripts
+
+# Forzar lintian a reconocer ceibal como un profile valido, evitando errores de lintian.
+LINTIAN_PROFILE="ceibal"
+DEBUILD_LINTIAN_OPTS="--profile=ceibal"

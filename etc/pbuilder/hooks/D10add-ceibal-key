@@ -1,0 +1,17 @@
+#!/bin/sh
+apt-get install -y lsb-release
+
+REPO_SERVER=apt.ceibal.edu.uy
+RELEASE=`lsb_release -c -s`
+case $RELEASE in
+    utopic|trusty)
+        CODENAME=tero
+        ;;
+    precise)
+        CODENAME=tatu
+        ;;
+esac
+
+echo "deb http://${REPO_SERVER}/ubuntu/ ${CODENAME} main" > /etc/apt/sources.list.d/ceibal-apt.list
+# Do not fail if update fails, in case some repo is not accessible
+apt-get -y update || true

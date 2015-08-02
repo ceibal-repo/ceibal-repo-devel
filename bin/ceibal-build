@@ -1,0 +1,189 @@
+#!/bin/bash
+
+unset CDPATH
+
+GIT_SERVER=github.com
+GIT_BASE=/ceibal-repo/
+ARCH="i386 amd64"
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+LOCAL=0
+CLEAN=0
+DEFAULT_CODENAME=$REPO_CODENAME
+DEFAULT_ARCH=$ARCH
+
+usage() {
+    cat >&2 <<USAGE
+Uso: ${0} [-c] [-a ARCH] [-l | -n <package name> -v <version>]
+    -a Construir solo para esta arquitectura (por defecto: ${ARCH}).
+    -r Repositorio donde se va a publicar el paquete (por defecto: ${DEFAULT_CODENAME}).
+    -c Borrar el directorio que contiene el código si falla la construcción.
+
+PASAR  
+    -l Construir el paquete a partir del directorio actual.
+O
+    -n Nombre del paquete. El nombre de un repositorio git que será clonado
+       para obtener el código del paquete.
+    -v La versión del paquete a publicar ('latest' para usar el último commit).
+       Indica el tag de git a partir del cual se obtendrá el código del 
+       paquete
+USAGE
+}
+
+while getopts ":hlca:n:v:r:" opt; do
+    case $opt in
+        a)
+            ARCH=$OPTARG
+            ;;
+        n)
+            NAME=$OPTARG
+            ;;
+        v)
+            VERSION=$OPTARG
+            ;;
+        r)
+            REPO_CODENAME=$OPTARG
+            ;;
+        l)
+            LOCAL=1
+            ;;
+        c)
+            CLEAN=1
+            ;;
+        h)
+            usage
+            exit 0
+            ;;
+         \?)
+            echo "Invalid option: -$OPTARG" >&2
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+if [[ $LOCAL -eq 0  && ($NAME == "" || $VERSION == "") ]]; then
+    usage
+    exit 1
+fi
+
+VERSION=$(echo $VERSION|tr ':' '_'|tr '~' '_')
+
+ARCH_LIST=(${ARCH})
+
+if [ "${#ARCH_LIST[@]}" -lt 1 ]; then
+    echo "Debe indicar al menos una arquitectura." >&2
+    exit 1
+fi
+
+if [[ $LOCAL -eq 0 ]]; then
+
+    # Create temporary folder for git clone
+    SOURCE_DIR=$(mktemp --tmpdir -d "build-${NAME}_${VERSION}-XXXXXX")
+    cd "${SOURCE_DIR}"
+
+    GIT_REPO="git://${GIT_SERVER}${GIT_BASE}${NAME}.git"
+    echo "Clonando ${GIT_REPO}..."
+    # Get git repository. Use git-buildpackage in case the repo was created with git-buildpackage.
+    gbp clone --pristine-tar "${GIT_REPO}";
+    cd "${NAME}"
+    
+    # Checkout tag & verify signature.
+    if [[ $VERSION != "latest" ]]; then
+        echo "Obteniendo tag y verificando firma."
+        POSSIBLE_TAGS=(${VERSION} ${REPO_CODENAME}-${VERSION})
+        SELECTED_TAG=
+        for tag in "${POSSIBLE_TAGS[@]}"; do
+             if git rev-parse $tag >/dev/null 2>&1; then
+                 git checkout "tags/${tag}"
+                 [ $? -ne 0 ] && echo "Error: no se pudo obtener el código para el tag '${tag}'." >&2 && exit 1;
+                 git tag -v "${tag}"
+                 [ $? -ne 0 ] && echo "Error: Firma del tag '${tag}' inválida. Asegurese de que la clave GPG pública del desarrollador fue registrada en el servidor de build." >&2 && exit 1;
+                 SELECTED_TAG=${tag}
+                 break
+             fi
+        done
+        [ "${SELECTED_TAG}" == "" ] && echo "No existe un tag para ${POSSIBLE_TAGS[@]}." >&2 && exit 1;
+    fi
+fi
+
+ARCH_INDEP=1
+if grep "^\\s*Architecture:.*\(any\|amd64\|i386\).*\$" debian/control>/dev/null; then
+    ARCH_INDEP=0
+fi
+
+echo "Construyendo paquete..."
+if git branch|grep "pristine-tar">/dev/null; then
+    # Git-buildpackage like structure, use git-buildpackage instead of pdebuild
+    
+    # Build base architecture. 
+    # Use --git-ignore-branch since we are in a checked out tag.
+    main_arch=${ARCH_LIST[0]}
+    sudo GIT_PBUILDER_AUTOCONF=no ARCH="${main_arch}" gbp buildpackage --git-ignore-branch --git-pristine-tar --git-arch="${main_arch}" --git-dist="${BUILD_CODENAME}" \
+        --git-builder="pdebuild --architecture ${main_arch} --configfile /etc/pbuilderrc.${main_arch}.ceibal --debbuildopts -sa" 
+    if [[ $? -ne 0 ]]; then
+        "Falló la construcción del paquete para la arquitectura '${main_arch}'.">&2
+        if [[ $CLEAN -eq 1 ]]; then        
+            rm -rf "${SOURCE_DIR}"
+        else
+            echo "Fuentes en '${SOURCE_DIR}'.">&2
+        fi
+        exit 1
+    fi
+
+    # Build other architectures.
+    if [ "${ARCH_INDEP}" -eq 0 ]; then
+        for arch in "${ARCH_LIST[@]:1}"; do
+            # Remove files added/modified by the build process
+            if [[ $LOCAL -eq 0 ]]; then
+                sudo git reset --hard && git clean -dfx;
+            fi
+            sudo GIT_PBUILDER_AUTOCONF=no ARCH="${arch}" gbp buildpackage --git-dist="{BUILD_CODENAME}" --git-ignore-branch --git-pristine-tar --git-arch="${arch}" \
+                --git-builder="pdebuild --architecture ${arch} --configfile /etc/pbuilderrc.${arch}.ceibal --debbuildopts -sa -- --binary-arch"
+        done
+    fi
+else
+    if [ "$(grep "3.0 (quilt)" debian/source/format)" != "" ]; then
+        # Quilt package, get upstream source
+        UPSTREAM_VERSION=$(sed -e "s/\(.*\)-.*/\1/" <<< "${VERSION}")
+        if [ "$UPSTREAM_VERSION" == "" ]; then 
+            "No se puede determinar la versión upstream para ${VERSION}."
+            exit 1
+        fi
+        ceibal-upstream-get -n "${NAME}" -v "${VERSION}"
+    fi
+
+    # Build base architecture.
+    main_arch=${ARCH_LIST[0]}
+    sudo ARCH="${main_arch}" pdebuild --architecture ${main_arch} --configfile "/etc/pbuilderrc.${main_arch}.ceibal" --debbuildopts -sa 
+    if [[ $? -ne 0 ]]; then
+        echo "Falló la construcción del paquete para la arquitectura '${main_arch}'.">&2
+        if [[ $CLEAN -eq 1 ]]; then        
+            rm -rf "${SOURCE_DIR}"
+        else
+            echo "Fuentes en '${SOURCE_DIR}'.">&2
+        fi
+        exit 1
+    fi
+
+    # Build other architectures.
+    if [ "${ARCH_INDEP}" -eq 0 ]; then
+        for arch in "${ARCH_LIST[@]:1}"; do
+            # Remove files added/modified by the build process
+            if [[ $LOCAL -eq 0 ]]; then
+                sudo git reset --hard && git clean -dfx;
+            fi
+            sudo ARCH="${arch}" pdebuild --architecture ${arch} --configfile "/etc/pbuilderrc.${arch}.ceibal" --debbuildopts -sa -- --binary-arch
+        done
+    fi
+fi
+
+# Delete source folder.
+rm -rf "${SOURCE_DIR}"

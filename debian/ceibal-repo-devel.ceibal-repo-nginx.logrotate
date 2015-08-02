@@ -1,0 +1,17 @@
+/var/log/ceibal-repo/nginx/*.log {
+    notifempty
+    daily
+	rotate 10
+	compress
+	missingok
+    sharedscripts
+prerotate
+    . /etc/ceibalrepo.conf
+    if [ -f "/etc/awstats/awstats.${REPO_SERVER}.conf" ]; then
+        /usr/lib/cgi-bin/awstats.pl -update -config="${REPO_SERVER}"
+    fi
+endscript
+postrotate
+    [ ! -f /var/run/nginx.pid ] || kill -USR1 `cat /var/run/nginx.pid`
+endscript
+}

@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# Configures a build & development environment for ceibal repository.
+
+unset CDPATH
+
+BUILD_USER=builder
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+if [[ $EUID -ne 0 ]]; then
+    echo "El script debe ejecutarse como root." >&2
+    exit 1
+fi
+
+if ! id -u "${BUILD_USER}" > /dev/null; then
+    echo "Agregando usuario ${BUILD_USER}"
+    useradd -m -U "${BUILD_USER}" -s /bin/bash
+    if [[ $? -ne 0 ]]; then 
+        echo "Fallo al agregar usuario ${BUILD_USER}.">&2
+        exit 1
+    fi
+fi
+
+BUILD_HOME=$(echo ~${BUILD_USER})
+if [ ! -e "${BUILD_HOME}/.devscripts" ]; then
+    cp /usr/share/doc/ceibal-repo-devel/examples/devscripts "${BUILD_HOME}/.devscripts"
+fi
+
+if [ ! -e "${BUILD_HOME}/.gbp.conf" ]; then
+    cp /usr/share/doc/ceibal-repo-devel/examples/gbp.conf "${BUILD_HOME}/.gbp.conf"
+fi
+
+${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.amd64.ceibal
+${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.i386.ceibal

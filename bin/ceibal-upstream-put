@@ -1,0 +1,52 @@
+#!/bin/bash
+
+#
+# Copies a .tar.gz file to the upstream/ path of the build server.
+# 
+
+BUILD_USER=devel
+BUILD_SERVER=builds.ceibal.edu.uy
+BUILD_UPSTREAM=/srv/reprepro/upstream/
+SSH_PORT=3022
+
+if [ -f /etc/ceibalrepo.conf ]; then
+    . /etc/ceibalrepo.conf
+fi
+
+if [ -f ~/.ceibalrepo ]; then
+    . ~/.ceibalrepo
+fi
+
+while getopts ":n:v:" opt; do
+    case $opt in
+        n)
+            NAME=$OPTARG
+            ;;
+        v)
+            VERSION=$OPTARG
+            ;;
+         \?)
+           echo "Invalid option: -$OPTARG" >&2
+           ;;
+    esac
+done
+
+if [ -z "$NAME" -o -z "$VERSION" ]; then
+    echo "Usage: $0 -n <package name> -v <version>" >&2
+    exit 1
+fi
+
+UPSTREAM_SRC="${NAME}-${VERSION}.tar.gz"
+if [ ! -e "${UPSTREAM_SRC}" ]; then
+    echo "No se encontro el archivo ${FILENAME}"
+fi
+
+BUILD_HOST=${BUILD_USER}@${BUILD_SERVER}
+
+chmod 664 "{UPSTREAM_SRC}"
+if [ "$?" -ne 0 ]; then
+    echo "No se pudo cambiar los permisos del archivo a 664, necesario previo a la copia." >&2
+    exit 1
+fi
+
+scp -P ${SSH_PORT} "${UPSTREAM_SRC}" "${BUILD_HOST}:${BUILD_UPSTREAM}/${UPSTREAM_SRC}"
