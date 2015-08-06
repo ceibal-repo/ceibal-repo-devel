@@ -39,3 +39,15 @@ fi
 
 ${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.amd64.ceibal
 ${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.i386.ceibal
+
+echo <<EOF
+Agregar las siguientes lineas al archivo de sudoers (visudo):
+-------------------------------------------------------------------------------
+
+Cmnd_Alias      PBUILDER = /usr/bin/pdebuild, /usr/bin/gbp, /usr/bin/git reset --hard
+Defaults!PBUILDER env_keep+="ARCH DIST REPO_CODENAME GIT_PBUILDER_AUTOCONF"
+
+%builder ALL=NOPASSWD: PBUILDER
+
+-------------------------------------------------------------------------------
+EOF
