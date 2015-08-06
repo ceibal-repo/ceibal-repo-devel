@@ -36,8 +36,8 @@ if ! id -u "${REPO_USER}" > /dev/null; then
     fi
 
     mkdir /home/${REPO_USER}/staging-i386
-    mkdir /home/${REPO_USER}/staging-amd4
-    chown ${REPO_USER}:${REPO_USER} /home/${REPO_USER}/staging-i386 /home/${REPO_USER}/staging-amd4
+    mkdir /home/${REPO_USER}/staging-amd64
+    chown ${REPO_USER}:${REPO_USER} /home/${REPO_USER}/staging-i386 /home/${REPO_USER}/staging-amd64
 fi
 
 KEY_ID=""
