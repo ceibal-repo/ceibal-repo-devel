@@ -38,9 +38,10 @@ Uso: $0 -n <nombre del paquete> -v <version> [-a ARCH] [-r <codename>] [-b]
 USAGE
 }
 
+LOCAL=0
 EXPORT=0
 FORCE_EXPORT=0
-while getopts ":hbefa:n:v:r:" opt; do
+while getopts ":hblefa:n:v:r:" opt; do
     case $opt in
         a)
             ARCH=$OPTARG
@@ -59,6 +60,9 @@ while getopts ":hbefa:n:v:r:" opt; do
             ;;
         e)
             EXPORT=1
+            ;;
+        l)
+            LOCAL=1
             ;;
         h)
             usage
@@ -84,7 +88,7 @@ if [ "${#ARCH_LIST[@]}" -lt 1 ]; then
     exit 1
 fi
 
-FILE_VERSION=${VERSION/[0-9]_/}
+FILE_VERSION=${VERSION/_/"~"}
 
 export_packages() {
     echo "Publicando paquetes en el repositorio '${REPO_CODENAME}'."
@@ -98,6 +102,9 @@ for arch in ${ARCH_LIST[@]}; do
     else
         echo "No existe archivo a publicar \\\${changes_file}"
     fi
+
+    echo "Paquetes en el repositorio:"
+    reprepro --basedir ${REPO_BASEDIR} list ${REPO_CODENAME}
 done
 exit
 IN_DAEMON_EOF
@@ -111,23 +118,34 @@ if [[ ${EXPORT} -eq 1 ]]; then
    exit 0
 fi
 
-ssh -t -p ${SSH_PORT} -A ${BUILD_USER}@${BUILD_SERVER} "ceibal-build -a '${ARCH}' -n '${NAME}' -v '${VERSION}' -r '${REPO_CODENAME}'"
-[ $? -ne 0 ] && echo 'Falló la construcción del paquete.' >&2 && exit 1;
-
+if [[ ${LOCAL} -eq 1 ]]; then
+    debuild -uc -us
+    [ $? -ne 0 ] && echo 'Falló la construcción del paquete.' >&2 && exit 1;
+else
+    ssh -t -p ${SSH_PORT} -A ${BUILD_USER}@${BUILD_SERVER} "ceibal-build -a '${ARCH}' -n '${NAME}' -v '${VERSION}' -r '${REPO_CODENAME}'"
+    [ $? -ne 0 ] && echo 'Falló la construcción del paquete.' >&2 && exit 1;
+fi
 
 # Copy built files to repository server for publishing.
 TEMP_BUILD_DIR=`mktemp -d`
 for arch in "${ARCH_LIST[@]}"; do
-    echo "Copiando archivos creados al equipo local bajo '${TEMP_BUILD_DIR}/${arch}'."
-    mkdir ${TEMP_BUILD_DIR}/${arch}
-    scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*${FILE_VERSION}[_.]* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
-    scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*.tar.* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
-    if [ $? -ne 0 ]; then 
-        echo "No se crearon archivos para la arquitectura '${arch}'."
-        rm -rf ${TEMP_BUILD_DIR}/${arch}
-    else 
+
+    if [[ ${LOCAL} -ne 1 ]]; then
+        echo "Copiando archivos creados al equipo local bajo '${TEMP_BUILD_DIR}/${arch}'."
+        mkdir ${TEMP_BUILD_DIR}/${arch}
+        scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*${FILE_VERSION}[_.]* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
+        scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*.tar.* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
+        if [ $? -ne 0 ]; then
+            echo "No se crearon archivos para la arquitectura '${arch}'."
+            rm -rf ${TEMP_BUILD_DIR}/${arch}
+        else
+            echo "Copiando archivos creados al repositorio bajo '${REPO_USER}@${REPO_SERVER}:staging-${arch}/'."
+            scp -P ${SSH_PORT} ${TEMP_BUILD_DIR}/${arch}/* ${REPO_USER}@${REPO_SERVER}:staging-${arch}/
+        fi
+    else
         echo "Copiando archivos creados al repositorio bajo '${REPO_USER}@${REPO_SERVER}:staging-${arch}/'."
-        scp -P ${SSH_PORT} ${TEMP_BUILD_DIR}/${arch}/* ${REPO_USER}@${REPO_SERVER}:staging-${arch}/
+        scp -P ${SSH_PORT} ../${NAME}*${FILE_VERSION}[_.]* ${REPO_USER}@${REPO_SERVER}:staging-${arch}/
+        scp -P ${SSH_PORT} ../${NAME}*.tar.* ${REPO_USER}@${REPO_SERVER}:staging-${arch}/
     fi
 done
 
