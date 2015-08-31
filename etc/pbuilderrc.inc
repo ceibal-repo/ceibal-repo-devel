@@ -35,7 +35,6 @@ if [ -n "${ARCH}" ]; then
     NAME="$NAME-$ARCH"
     DEBOOTSTRAPOPTS=("--arch" "${ARCH}" "${DEBOOTSTRAPOPTS[@]}")
 fi
-PDEBUILD_PBUILDER=cowbuilder
 # BASETGZ="/var/cache/pbuilder/$NAME-base.tgz"
 # Optionally, set BASEPATH (and not BASETGZ) if using cowbuilder
 BASEPATH="/var/cache/pbuilder/$NAME/base.cow/"

@@ -28,7 +28,7 @@ if ! id -u "${BUILD_USER}" > /dev/null; then
     fi
 fi
 
-BUILD_HOME=$(echo ~${BUILD_USER})
+BUILD_HOME=$(/bin/sh -c "echo ~${BUILD_USER}")
 if [ ! -e "${BUILD_HOME}/.devscripts" ]; then
     cp /usr/share/doc/ceibal-repo-devel/examples/devscripts "${BUILD_HOME}/.devscripts"
 fi
@@ -37,8 +37,11 @@ if [ ! -e "${BUILD_HOME}/.gbp.conf" ]; then
     cp /usr/share/doc/ceibal-repo-devel/examples/gbp.conf "${BUILD_HOME}/.gbp.conf"
 fi
 
-${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.amd64.ceibal
-${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.i386.ceibal
+for dist in precise trusty; do
+    for arch in i386 amd64; do
+        /bin/bash -c "DIST=${dist};. /etc/pbuilderrc.${arch}.ceibal; mkdir -p "\$BASEPATH"; ${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.amd64.ceibal"
+    done
+done
 
 echo <<EOF
 Agregar las siguientes lineas al archivo de sudoers (visudo):
