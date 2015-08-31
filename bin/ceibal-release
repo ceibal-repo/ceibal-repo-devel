@@ -114,7 +114,7 @@ git add ./debian/changelog
 LAST_MESSAGE=$(git log -1 --pretty=%B)
 NEW_MESSAGE="Se actualizó el changelog para versión ${REPO_CODENAME}-${VERSION}."
 
-if [ "${LAST_MESSAGE}" ==  "${NEW_MESSAGE}" -a $MUST_PUSH ]; then
+if [ "${LAST_MESSAGE}" -eq  "${NEW_MESSAGE}" -a $MUST_PUSH ]; then
     git commit --amend -m "${NEW_MESSAGE}"
 else
     git commit -m "${NEW_MESSAGE}"
