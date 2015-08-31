@@ -39,7 +39,7 @@ fi
 
 for dist in precise trusty; do
     for arch in i386 amd64; do
-        /bin/bash -c "DIST=${dist};. /etc/pbuilderrc.${arch}.ceibal; mkdir -p "\$BASEPATH"; ${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.amd64.ceibal"
+        /bin/bash -c "DIST=${dist};. /etc/pbuilderrc.${arch}.ceibal; mkdir -p "\$BASEPATH"; ${PDEBUILD_PBUILDER} --create --configfile /etc/pbuilderrc.${arch}.ceibal"
     done
 done
 
