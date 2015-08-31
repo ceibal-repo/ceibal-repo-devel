@@ -1,3 +1,9 @@
+ceibal-repo-devel (0.2) tero; urgency=medium
+
+  * Mejoras para soportar multiples repositorios. 
+
+ -- Plan Ceibal <apt@plan.ceibal.edu.uy>  Sun, 30 Aug 2015 22:24:24 -0300
+
 ceibal-repo-devel (0.1) tero; urgency=medium
 
   * Primera versión.
