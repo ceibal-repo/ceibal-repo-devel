@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -x
 unset CDPATH
 
 GIT_SERVER=github.com
@@ -18,10 +18,10 @@ LOCAL=0
 CLEAN=0
 DEFAULT_CODENAME=$REPO_CODENAME
 DEFAULT_ARCH=$ARCH
-
+SSH_REPO=0
 usage() {
     cat >&2 <<USAGE
-Uso: ${0} [-c] [-a ARCH] [-l | -n <package name> -v <version>]
+Uso: ${0} [-c] [-s] [-a ARCH] [-l | -n <package name> -v <version>]
     -a Construir solo para esta arquitectura (por defecto: ${ARCH}).
     -r Repositorio donde se va a publicar el paquete (por defecto: ${DEFAULT_CODENAME}).
     -c Borrar el directorio que contiene el código si falla la construcción.
@@ -34,10 +34,11 @@ O
     -v La versión del paquete a publicar ('latest' para usar el último commit).
        Indica el tag de git a partir del cual se obtendrá el código del 
        paquete
+    -s Usar SSH para conectarse al repositorio git (repositorios privados).
 USAGE
 }
 
-while getopts ":hlca:n:v:r:" opt; do
+while getopts ":hlcsa:n:v:r:" opt; do
     case $opt in
         a)
             ARCH=$OPTARG
@@ -56,6 +57,9 @@ while getopts ":hlca:n:v:r:" opt; do
             ;;
         c)
             CLEAN=1
+            ;;
+        s)
+            SSH_REPO=1
             ;;
         h)
             usage
@@ -98,7 +102,12 @@ if [[ $LOCAL -eq 0 ]]; then
     SOURCE_DIR=$(mktemp --tmpdir -d "build-${NAME}_${VERSION}-XXXXXX")
     cd "${SOURCE_DIR}"
 
-    GIT_REPO="git://${GIT_SERVER}${GIT_BASE}${NAME}.git"
+    if [[ $SSH_REPO -eq 1 ]]; then
+        GIT_REPO="git@${GIT_SERVER}:${GIT_BASE}/${NAME}.git"
+    else
+        GIT_REPO="git://${GIT_SERVER}/${GIT_BASE}/${NAME}.git"
+    fi
+
     echo "Clonando ${GIT_REPO}..."
     # Get git repository. Use git-buildpackage in case the repo was created with git-buildpackage.
     gbp clone --pristine-tar "${GIT_REPO}";

@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -x
 #
 # Construye el paquete en el servidor de build y publica el paquete resultante 
 # en el repositorio.
@@ -26,22 +26,24 @@ if [ -f ~/.ceibalrepo ]; then
 fi
 DEFAULT_CODENAME=$REPO_CODENAME
 ONLY_BUILD=0
+SSH_REPO=0
 
 usage() {
     cat >&2 <<USAGE
-Uso: $0 -n <nombre del paquete> -v <version> [-a ARCH] [-r <codename>] [-b]
+Uso: $0 -n <nombre del paquete> -v <version> [-a ARCH] [-r <codename>] [-b] [-s]
     -a Construir y publicar solo para esta arquitectura (por defecto: ${ARCH}).
     -r Repositorio donde publicar el paquete (por defecto: ${DEFAULT_CODENAME}).
     -b Solo construir el paquete, no agregarlo al repositorio.
     -e Solo intentar exportar los paquetes construidos. Los paquetes ya deben
        estar disponibles en el servidor.
+    -s Usar SSH para conectarse al repositorio git (repositorios privados).
 USAGE
 }
 
 LOCAL=0
 EXPORT=0
 FORCE_EXPORT=0
-while getopts ":hblefa:n:v:r:" opt; do
+while getopts ":hblsefa:n:v:r:" opt; do
     case $opt in
         a)
             ARCH=$OPTARG
@@ -63,6 +65,9 @@ while getopts ":hblefa:n:v:r:" opt; do
             ;;
         l)
             LOCAL=1
+            ;;
+        s)
+            SSH_REPO=1
             ;;
         h)
             usage
@@ -88,7 +93,20 @@ if [ "${#ARCH_LIST[@]}" -lt 1 ]; then
     exit 1
 fi
 
+DIST=$REPO_CODENAME
+case $REPO_CODENAME in
+    tero)
+        DIST=trusty
+        ;;
+    tatu)
+        DIST=precise
+        ;;
+esac
+
 FILE_VERSION=${VERSION/_/"~"}
+
+# Pasar -A para que se pueda acceder a repos privados con la clave SSH.
+SSH_OPTS="-t -A"
 
 export_packages() {
     echo "Publicando paquetes en el repositorio '${REPO_CODENAME}'."
@@ -110,7 +128,7 @@ exit
 IN_DAEMON_EOF
 EOF
 )"
-    ssh -t -p ${SSH_PORT} ${REPO_USER}@${REPO_SERVER} "${EXPORT_SCRIPT}"
+    ssh ${SSH_OPTS} -p ${SSH_PORT} ${REPO_USER}@${REPO_SERVER} "${EXPORT_SCRIPT}"
 }
 
 if [[ ${EXPORT} -eq 1 ]]; then
@@ -118,11 +136,18 @@ if [[ ${EXPORT} -eq 1 ]]; then
    exit 0
 fi
 
+
 if [[ ${LOCAL} -eq 1 ]]; then
     debuild -uc -us
     [ $? -ne 0 ] && echo 'Falló la construcción del paquete.' >&2 && exit 1;
 else
-    ssh -t -p ${SSH_PORT} -A ${BUILD_USER}@${BUILD_SERVER} "ceibal-build -a '${ARCH}' -n '${NAME}' -v '${VERSION}' -r '${REPO_CODENAME}'"
+    CEIBAL_BUILD_OPTS="-a '${ARCH}' -n '${NAME}' -v '${VERSION}' -r '${REPO_CODENAME}'"
+    # Acceder al repo via SSH (repo privados).
+    if [[ ${SSH_REPO} -eq 1 ]]; then
+        CEIBAL_BUILD_OPTS="-s "${CEIBAL_BUILD_OPTS}
+    fi
+
+    ssh ${SSH_OPTS} -p ${SSH_PORT} -A ${BUILD_USER}@${BUILD_SERVER} "ceibal-build ${CEIBAL_BUILD_OPTS}"
     [ $? -ne 0 ] && echo 'Falló la construcción del paquete.' >&2 && exit 1;
 fi
 
@@ -133,8 +158,8 @@ for arch in "${ARCH_LIST[@]}"; do
     if [[ ${LOCAL} -ne 1 ]]; then
         echo "Copiando archivos creados al equipo local bajo '${TEMP_BUILD_DIR}/${arch}'."
         mkdir ${TEMP_BUILD_DIR}/${arch}
-        scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*${FILE_VERSION}[_.]* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
-        scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${BUILD_CODENAME}-${arch}/result/${NAME}*.tar.* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
+        scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${DIST}-${arch}/result/${NAME}*${FILE_VERSION}[_.]* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
+        scp -P ${SSH_PORT} ${BUILD_USER}@${BUILD_SERVER}:${BUILD_BASEDIR}/${DIST}-${arch}/result/${NAME}*.tar.* ${TEMP_BUILD_DIR}/${arch}/ 2>&1
         if [ $? -ne 0 ]; then
             echo "No se crearon archivos para la arquitectura '${arch}'."
             rm -rf ${TEMP_BUILD_DIR}/${arch}
@@ -152,7 +177,7 @@ done
 if [[ ${ONLY_BUILD} -eq 0 ]]; then
     # Copiar ceibal-repo a la raíz del servidor HTTP, y crear un link a la última versión.
     if [ "${NAME}" = "ceibal-repo" ]; then
-	    ssh -t -p ${SSH_PORT} ${REPO_USER}@${REPO_SERVER} 'bash -sh'<<EOF
+	    ssh ${SSH_OPTS} -p ${SSH_PORT} ${REPO_USER}@${REPO_SERVER} 'bash -sh'<<EOF
 cp staging-${ARCH_LIST[0]}/${NAME}_${FILE_VERSION}_all.deb ${REPO_WEBROOT};
 ln -f -s ${REPO_WEBROOT}/${NAME}_${FILE_VERSION}_all.deb ${REPO_WEBROOT}/${NAME}.deb
 EOF
