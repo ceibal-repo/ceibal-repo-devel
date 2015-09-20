@@ -1,3 +1,9 @@
+ceibal-repo-devel (0.4) tero; urgency=medium
+
+  * Soporte para repos privados y bitbucket.
+
+ -- Plan Ceibal <apt@plan.ceibal.edu.uy>  Sun, 20 Sep 2015 18:33:32 -0300
+
 ceibal-repo-devel (0.3) tero; urgency=medium
 
   * Fix en ceibal-setup-builder 
